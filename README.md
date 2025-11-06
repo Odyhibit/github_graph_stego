@@ -117,7 +117,7 @@ Create a `config.json` file for default settings:
 
 ### Legal and Ethical Use
 
-- **Authorized Use Only**: This tool is for educational purposes, security research, CTF challenges, and authorized penetration testing
+- **Authorized Use Only**: This tool is for educational purposes, CTF challenges.
 - **Respect Terms of Service**: Ensure compliance with GitHub's Terms of Service
 - **Academic/Research**: Suitable for demonstrating steganographic techniques in educational settings
 
