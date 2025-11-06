@@ -1,49 +1,130 @@
 #!/usr/bin/env python3
 """
 GitHub Contribution Graph Steganography Decoder
-Extracts hidden messages from GitHub contribution patterns
+
+Extracts hidden messages from GitHub contribution patterns.
 """
 
 import requests
 import json
+import logging
+import os
 from datetime import datetime, timedelta
+from typing import List, Dict, Any, Optional
+from pathlib import Path
 import argparse
 import sys
 
 
+# Constants
+BITS_PER_BYTE = 8
+BITS_PER_CHUNK = 2  # 2-bit encoding for 4 GitHub color levels
+
+# ASCII character range for printable characters
+ASCII_PRINTABLE_MIN = 32
+ASCII_PRINTABLE_MAX = 126
+
+# Commit count tolerance ranges for 2-bit decoding
+# Maps GitHub's visual color levels to bit patterns
+COMMIT_RANGES = [
+    (0, 2, "00"),    # Light green (0-2 commits) -> 00
+    (3, 7, "01"),    # Medium-light green (3-7 commits) -> 01
+    (8, 15, "10"),   # Medium-dark green (8-15 commits) -> 10
+    (16, 100, "11")  # Darkest green (16+ commits) -> 11
+]
+
+# GitHub GraphQL API endpoint
+GITHUB_GRAPHQL_API = "https://api.github.com/graphql"
+
+# Set up logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(levelname)s: %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+
+class DecodingError(Exception):
+    """Custom exception for decoding errors."""
+    pass
+
+
+class GitHubAPIError(Exception):
+    """Custom exception for GitHub API errors."""
+    pass
+
+
 class GitHubContributionDecoder:
-    def __init__(self, username, token=None):
+    """Decodes messages from GitHub contribution graphs."""
+
+    def __init__(self, username: str, token: Optional[str] = None):
         """
-        Initialize decoder with GitHub username and optional API token
+        Initialize decoder with GitHub username and optional API token.
 
         Args:
             username: GitHub username to analyze
             token: GitHub personal access token (optional but recommended for rate limits)
         """
         self.username = username
-        self.token = token
-        self.api_url = "https://api.github.com/graphql"
+        self.token = token or self._load_token_from_file()
+        self.api_url = GITHUB_GRAPHQL_API
+        self.commit_ranges = COMMIT_RANGES
 
-        # Color level to commit count mapping (reverse of encoder)
-        self.commit_to_level = {
-            0: 0,  # No contribution
-            1: 1,  # Light green
-            5: 2,  # Medium-light green
-            10: 3,  # Medium-dark green
-            20: 4  # Darkest green
-        }
+        if self.token:
+            logger.debug("Using GitHub API token for authentication")
+        else:
+            logger.warning("No GitHub token provided. API rate limits may apply.")
 
-    def get_contribution_data(self, start_date, end_date):
+    def _load_token_from_file(self, token_file: str = "token.txt") -> Optional[str]:
         """
-        Fetch contribution data from GitHub GraphQL API
+        Try to load token from file.
+
+        Args:
+            token_file: Path to token file
+
+        Returns:
+            Token string or None if file doesn't exist
+        """
+        try:
+            token_path = Path(token_file)
+            if token_path.exists():
+                with open(token_path, 'r') as f:
+                    token = f.read().strip()
+                    if token:
+                        logger.info(f"Loaded GitHub token from {token_file}")
+                        return token
+        except (OSError, IOError) as e:
+            logger.debug(f"Could not load token from {token_file}: {e}")
+        return None
+
+    def get_contribution_data(
+        self,
+        start_date: str,
+        end_date: str,
+        retry_count: int = 3
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        Fetch contribution data from GitHub GraphQL API.
 
         Args:
             start_date: Start date (YYYY-MM-DD)
             end_date: End date (YYYY-MM-DD)
+            retry_count: Number of retries on failure
 
         Returns:
             List of dicts with 'date' and 'count' keys
+
+        Raises:
+            GitHubAPIError: If API request fails after retries
+            ValueError: If date format is invalid
         """
+        # Validate date format
+        try:
+            datetime.strptime(start_date, "%Y-%m-%d")
+            datetime.strptime(end_date, "%Y-%m-%d")
+        except ValueError as e:
+            raise ValueError(f"Invalid date format: {e}. Use YYYY-MM-DD")
+
         query = """
         query($username: String!, $from: DateTime!, $to: DateTime!) {
           user(login: $username) {
@@ -72,40 +153,58 @@ class GitHubContributionDecoder:
         }
 
         if self.token:
-            headers["Authorization"] = f"token {self.token}"
+            headers["Authorization"] = f"Bearer {self.token}"
 
-        try:
-            response = requests.post(
-                self.api_url,
-                json={"query": query, "variables": variables},
-                headers=headers
-            )
-            response.raise_for_status()
-            data = response.json()
+        last_error = None
+        for attempt in range(retry_count):
+            try:
+                logger.debug(f"Fetching contribution data (attempt {attempt + 1}/{retry_count})...")
+                response = requests.post(
+                    self.api_url,
+                    json={"query": query, "variables": variables},
+                    headers=headers,
+                    timeout=30
+                )
+                response.raise_for_status()
+                data = response.json()
 
-            if "errors" in data:
-                print(f"GraphQL Error: {data['errors']}")
-                return None
+                if "errors" in data:
+                    error_msg = data['errors'][0].get('message', 'Unknown error')
+                    raise GitHubAPIError(f"GraphQL Error: {error_msg}")
 
-            # Flatten the nested structure
-            contributions = []
-            weeks = data["data"]["user"]["contributionsCollection"]["contributionCalendar"]["weeks"]
-            for week in weeks:
-                for day in week["contributionDays"]:
-                    contributions.append({
-                        "date": day["date"],
-                        "count": day["contributionCount"]
-                    })
+                # Check if user exists
+                if data.get("data", {}).get("user") is None:
+                    raise GitHubAPIError(f"User '{self.username}' not found")
 
-            return contributions
+                # Flatten the nested structure
+                contributions = []
+                weeks = data["data"]["user"]["contributionsCollection"]["contributionCalendar"]["weeks"]
+                for week in weeks:
+                    for day in week["contributionDays"]:
+                        contributions.append({
+                            "date": day["date"],
+                            "count": day["contributionCount"]
+                        })
 
-        except requests.exceptions.RequestException as e:
-            print(f"Error fetching data: {e}")
-            return None
+                logger.debug(f"Fetched {len(contributions)} days of contribution data")
+                return contributions
 
-    def filter_weekdays(self, contributions):
+            except requests.exceptions.Timeout as e:
+                last_error = f"Request timeout: {e}"
+                logger.warning(f"Attempt {attempt + 1} timed out")
+            except requests.exceptions.RequestException as e:
+                last_error = f"Request error: {e}"
+                logger.warning(f"Attempt {attempt + 1} failed: {e}")
+            except json.JSONDecodeError as e:
+                last_error = f"Invalid JSON response: {e}"
+                logger.warning(f"Attempt {attempt + 1} received invalid JSON")
+
+        # All retries failed
+        raise GitHubAPIError(f"Failed to fetch contribution data after {retry_count} attempts: {last_error}")
+
+    def filter_weekdays(self, contributions: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """
-        Filter contributions to only include weekdays (Mon-Fri)
+        Filter contributions to only include weekdays (Mon-Fri).
 
         Args:
             contributions: List of contribution dicts
@@ -119,198 +218,274 @@ class GitHubContributionDecoder:
             # Monday = 0, Sunday = 6
             if date_obj.weekday() < 5:  # Mon-Fri
                 weekday_contributions.append(contrib)
+
+        logger.debug(f"Filtered to {len(weekday_contributions)} weekdays from {len(contributions)} total days")
         return weekday_contributions
 
-    def map_commits_to_bits(self, contributions, use_zero_level=False):
+    def map_commits_to_bits(self, contributions: List[Dict[str, Any]]) -> str:
         """
-        Map commit counts to bit patterns
+        Map commit counts to bit patterns using 2-bit encoding.
 
         Args:
             contributions: List of contribution dicts
-            use_zero_level: If True, use 5 levels (3 bits). If False, use 4 levels (2 bits)
 
         Returns:
             Binary string
+
+        Raises:
+            DecodingError: If commit count mapping fails
         """
         binary = ""
 
         for contrib in contributions:
             count = contrib["count"]
 
-            # Find the closest matching level
-            if use_zero_level:
-                # 3-bit encoding with 5 levels
-                if count == 0:
-                    binary += "000"
-                elif count <= 2:
-                    binary += "001"
-                elif count <= 7:
-                    binary += "010"
-                elif count <= 15:
-                    binary += "011"
-                else:
-                    binary += "100"
-            else:
-                # 2-bit encoding with 4 levels (ignoring zero)
-                if count == 0:
-                    continue  # Skip days with no commits
-                elif count <= 2:
-                    binary += "00"
-                elif count <= 7:
-                    binary += "01"
-                elif count <= 15:
-                    binary += "10"
-                else:
-                    binary += "11"
+            # Skip zero-commit days (no encoding)
+            if count == 0:
+                continue
+
+            # Find matching range
+            matched = False
+            for min_count, max_count, bit_pattern in self.commit_ranges:
+                if min_count <= count <= max_count:
+                    binary += bit_pattern
+                    matched = True
+                    break
+
+            if not matched:
+                logger.warning(f"Could not map commit count {count} on {contrib['date']}")
 
         return binary
 
-    def binary_to_ascii(self, binary_string):
+    def binary_to_ascii(self, binary_string: str, strict: bool = False) -> str:
         """
-        Convert binary string to ASCII text
+        Convert binary string to ASCII text.
 
         Args:
             binary_string: String of 0s and 1s
+            strict: If True, raise error on non-printable characters
 
         Returns:
             Decoded ASCII string
+
+        Raises:
+            DecodingError: If strict mode and non-printable characters found
         """
+        if not binary_string:
+            raise DecodingError("Empty binary string")
+
         # Pad to multiple of 8
-        padding = (8 - len(binary_string) % 8) % 8
+        padding = (BITS_PER_BYTE - len(binary_string) % BITS_PER_BYTE) % BITS_PER_BYTE
+        if padding > 0:
+            logger.debug(f"Padding binary string with {padding} zeros")
         binary_string += "0" * padding
 
         decoded = ""
-        for i in range(0, len(binary_string), 8):
-            byte = binary_string[i:i + 8]
+        for i in range(0, len(binary_string), BITS_PER_BYTE):
+            byte = binary_string[i:i + BITS_PER_BYTE]
             char_code = int(byte, 2)
-            # Only add printable ASCII characters
-            if 32 <= char_code <= 126:
+
+            # Check if printable ASCII
+            if ASCII_PRINTABLE_MIN <= char_code <= ASCII_PRINTABLE_MAX:
                 decoded += chr(char_code)
             elif char_code == 0 and decoded:  # Null terminator
                 break
+            elif strict:
+                raise DecodingError(f"Non-printable character code: {char_code}")
+            else:
+                # Skip non-printable characters in non-strict mode
+                logger.debug(f"Skipping non-printable character: {char_code}")
+                continue
 
         return decoded
 
-    def analyze_range(self, start_date, end_date):
+    def analyze_range(self, start_date: str, end_date: str) -> Optional[List[Dict[str, Any]]]:
         """
-        Analyze a date range and show statistics
+        Analyze a date range and show statistics.
 
         Args:
             start_date: Start date (YYYY-MM-DD)
             end_date: End date (YYYY-MM-DD)
+
+        Returns:
+            List of contributions
+
+        Raises:
+            GitHubAPIError: If API request fails
         """
-        print(f"\n=== Analyzing {self.username} ===")
-        print(f"Date range: {start_date} to {end_date}\n")
+        logger.info(f"\n=== Analyzing {self.username} ===")
+        logger.info(f"Date range: {start_date} to {end_date}\n")
 
         contributions = self.get_contribution_data(start_date, end_date)
 
         if not contributions:
-            print("Failed to fetch contribution data")
-            return
+            logger.error("Failed to fetch contribution data")
+            return None
 
         # Statistics
         total_days = len(contributions)
         days_with_commits = sum(1 for c in contributions if c["count"] > 0)
         total_commits = sum(c["count"] for c in contributions)
 
-        print(f"Total days: {total_days}")
-        print(f"Days with commits: {days_with_commits}")
-        print(f"Total commits: {total_commits}")
+        logger.info(f"Total days: {total_days}")
+        logger.info(f"Days with commits: {days_with_commits}")
+        logger.info(f"Total commits: {total_commits}")
 
         if days_with_commits > 0:
-            print(f"Average commits per active day: {total_commits / days_with_commits:.2f}")
+            logger.info(f"Average commits per active day: {total_commits / days_with_commits:.2f}")
 
         # Check if range is clear
         if days_with_commits == 0:
-            print("\n✓ Range is CLEAR - perfect for encoding!")
+            logger.info("\n✓ Range is CLEAR - perfect for encoding!")
         else:
-            print(f"\n⚠ Range has existing commits - encoding may interfere with existing data")
+            logger.warning(f"\n⚠ Range has existing commits - encoding may interfere with existing data")
 
         # Show weekday-only stats
         weekday_contributions = self.filter_weekdays(contributions)
-        weekday_commits = sum(c["count"] for c in weekday_contributions if c["count"] > 0)
+        weekday_days_with_commits = sum(1 for c in weekday_contributions if c["count"] > 0)
 
-        print(f"\nWeekdays only: {len(weekday_contributions)} days")
-        print(f"Weekday commits: {weekday_commits}")
+        logger.info(f"\nWeekdays only: {len(weekday_contributions)} days")
+        logger.info(f"Weekdays with commits: {weekday_days_with_commits}")
 
-        # Calculate capacity
-        capacity_2bit = len(weekday_contributions) * 2 // 8  # bytes
-        capacity_3bit = len(weekday_contributions) * 3 // 8  # bytes
+        # Calculate capacity (2-bit encoding)
+        capacity = len(weekday_contributions) * BITS_PER_CHUNK // BITS_PER_BYTE  # bytes
 
-        print(f"\n=== Encoding Capacity ===")
-        print(f"2-bit encoding (4 levels): {capacity_2bit} bytes ({capacity_2bit} characters)")
-        print(f"3-bit encoding (5 levels): {capacity_3bit} bytes ({capacity_3bit} characters)")
+        logger.info(f"\n=== Encoding Capacity ===")
+        logger.info(f"2-bit encoding (4 GitHub color levels): {capacity} bytes ({capacity} characters)")
+        logger.info(f"Approximate capacity: ~{capacity // 4} characters per month (weekdays only)")
 
         return contributions
 
-    def decode_message(self, start_date, end_date, weekdays_only=True, use_zero_level=False):
+    def decode_message(
+        self,
+        start_date: str,
+        end_date: str,
+        weekdays_only: bool = True,
+        strict: bool = False
+    ) -> Optional[str]:
         """
-        Decode a hidden message from the contribution graph
+        Decode a hidden message from the contribution graph.
 
         Args:
             start_date: Start date (YYYY-MM-DD)
             end_date: End date (YYYY-MM-DD)
             weekdays_only: Only use weekdays for decoding
-            use_zero_level: Use 5 levels (3-bit) instead of 4 levels (2-bit)
+            strict: Raise error on non-printable characters
 
         Returns:
             Decoded message string
+
+        Raises:
+            GitHubAPIError: If API request fails
+            DecodingError: If decoding fails
         """
         contributions = self.get_contribution_data(start_date, end_date)
 
         if not contributions:
-            return None
+            raise GitHubAPIError("Failed to fetch contribution data")
 
         if weekdays_only:
             contributions = self.filter_weekdays(contributions)
 
-        # Convert to binary
-        binary = self.map_commits_to_bits(contributions, use_zero_level)
+        # Convert to binary using 2-bit encoding
+        binary = self.map_commits_to_bits(contributions)
 
         if not binary:
-            print("No data to decode")
-            return None
+            raise DecodingError("No data to decode - all days have 0 commits")
 
-        print(f"\nBinary data ({len(binary)} bits): {binary[:64]}{'...' if len(binary) > 64 else ''}")
+        logger.info(f"\nBinary data ({len(binary)} bits): {binary[:64]}{'...' if len(binary) > 64 else ''}")
+        logger.info(f"Encoding: 2-bit (4 GitHub color levels)")
 
         # Convert to ASCII
-        message = self.binary_to_ascii(binary)
+        message = self.binary_to_ascii(binary, strict=strict)
+
+        if not message:
+            raise DecodingError("Decoded message is empty")
 
         return message
 
 
 def main():
+    """Main entry point for the decoder CLI."""
     parser = argparse.ArgumentParser(
-        description="Decode messages from GitHub contribution graphs"
+        description="Decode messages from GitHub contribution graphs",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  # Analyze a date range
+  python decoder.py username --start 2024-01-01 --end 2024-01-31
+
+  # Decode a message
+  python decoder.py username --start 2024-01-01 --end 2024-02-28 --decode
+
+  # Use GitHub token for better rate limits
+  python decoder.py username --token ghp_xxxxx --start 2024-01-01 --end 2024-02-28 --decode
+
+  # Set token via environment variable
+  export GITHUB_TOKEN=ghp_xxxxx
+  python decoder.py username --start 2024-01-01 --end 2024-02-28 --decode
+        """
     )
+
     parser.add_argument("username", help="GitHub username to analyze")
     parser.add_argument("--token", help="GitHub personal access token (optional)")
+    parser.add_argument("--token-file", default="token.txt", help="Path to token file (default: token.txt)")
     parser.add_argument("--start", required=True, help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", required=True, help="End date (YYYY-MM-DD)")
     parser.add_argument("--decode", action="store_true", help="Attempt to decode message")
     parser.add_argument("--all-days", action="store_true", help="Use all days (not just weekdays)")
-    parser.add_argument("--use-zero", action="store_true", help="Use 5-level encoding (3 bits per day)")
+    parser.add_argument("--strict", action="store_true", help="Strict mode: fail on non-printable characters")
+    parser.add_argument("--verbose", action="store_true", help="Enable verbose logging")
+    parser.add_argument("--quiet", action="store_true", help="Minimal output")
 
     args = parser.parse_args()
 
-    decoder = GitHubContributionDecoder(args.username, args.token)
+    # Set logging level
+    if args.quiet:
+        logger.setLevel(logging.WARNING)
+    elif args.verbose:
+        logger.setLevel(logging.DEBUG)
 
-    if args.decode:
-        print(f"\n=== Decoding Message ===")
-        message = decoder.decode_message(
-            args.start,
-            args.end,
-            weekdays_only=not args.all_days,
-            use_zero_level=args.use_zero
+    # Get token from arguments, environment, or file
+    token = args.token or os.environ.get('GITHUB_TOKEN')
+
+    try:
+        # Create decoder
+        decoder = GitHubContributionDecoder(
+            args.username,
+            token=token
         )
 
-        if message:
-            print(f"\nDecoded message: {message}")
+        # If no token from args/env, try loading from file
+        if not token and args.token_file:
+            decoder.token = decoder._load_token_from_file(args.token_file)
+
+        if args.decode:
+            logger.info("\n=== Decoding Message ===")
+            message = decoder.decode_message(
+                args.start,
+                args.end,
+                weekdays_only=not args.all_days,
+                strict=args.strict
+            )
+
+            if message:
+                logger.info(f"\nDecoded message: {message}")
+            else:
+                logger.error("\nFailed to decode message")
+                return 1
         else:
-            print("\nFailed to decode message")
-    else:
-        decoder.analyze_range(args.start, args.end)
+            decoder.analyze_range(args.start, args.end)
+
+        return 0
+
+    except (GitHubAPIError, DecodingError, ValueError) as e:
+        logger.error(f"Error: {e}")
+        return 1
+    except KeyboardInterrupt:
+        logger.info("\nOperation cancelled by user")
+        return 130
 
 
 if __name__ == "__main__":
-    main()
+    exit(main())

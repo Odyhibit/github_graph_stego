@@ -1,0 +1,8 @@
+{
+  "author_name": "John Doe",
+  "author_email": "john.doe@example.com",
+  "commit_message_template": "Update",
+  "weekdays_only": true,
+  "stealth_mode": false,
+  "time_randomization": false
+}
