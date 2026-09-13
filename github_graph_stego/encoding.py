@@ -35,6 +35,8 @@ COMMIT_LEVELS = {
     3: 10   # Medium-dark green (11)
 }
 MARKER_COMMITS = 20  # Darkest green, reserved for start/end markers
+HINT_COMMITS = 10  # Dark green visual clue cells; not marker-level.
+ARROW_GAP_WEEKS = 3
 
 ASCII_PRINTABLE_MIN = 32
 ASCII_PRINTABLE_MAX = 126
@@ -249,6 +251,98 @@ class GitHubContributionEncoder:
 
         return commit_plan
 
+    def arrow_hint_plan(
+        self,
+        start_date: datetime,
+        end_date: datetime,
+        year: Optional[int] = None
+    ) -> List[Tuple[str, int]]:
+        """
+        Create a five-row visual arrow clue separated from the payload block.
+
+        The arrow is placed to the left of the payload when there is room in the
+        same year. If not, it is mirrored to the right of the payload.
+
+        Args:
+            start_date: Payload start marker date
+            end_date: Payload end marker date
+            year: Year boundary to keep the clue inside
+
+        Returns:
+            List of (date_string, commit_count) tuples for clue cells
+
+        Raises:
+            EncodingError: If the arrow cannot fit in the selected year
+        """
+        year = year or start_date.year
+
+        left_plan = self._arrow_dates("left", start_date, end_date)
+        if self._plan_fits_year(left_plan, year):
+            return left_plan
+
+        right_plan = self._arrow_dates("right", start_date, end_date)
+        if self._plan_fits_year(right_plan, year):
+            return right_plan
+
+        raise EncodingError("Not enough room in the selected year for a separated arrow hint")
+
+    def _arrow_dates(
+        self,
+        side: str,
+        start_date: datetime,
+        end_date: datetime
+    ) -> List[Tuple[str, int]]:
+        """Build left or right visual arrow clue dates."""
+        if side == "left":
+            offsets = [
+                (-1, 1),
+                (-1, 2),
+                (0, 2),
+                (-4, 3),
+                (-3, 3),
+                (-2, 3),
+                (-1, 3),
+                (0, 3),
+                (1, 3),
+                (-1, 4),
+                (0, 4),
+                (-1, 5),
+            ]
+            anchor_week = self._week_start(start_date) - timedelta(weeks=ARROW_GAP_WEEKS)
+        else:
+            offsets = [
+                (1, 1),
+                (0, 2),
+                (1, 2),
+                (-1, 3),
+                (0, 3),
+                (1, 3),
+                (2, 3),
+                (3, 3),
+                (4, 3),
+                (0, 4),
+                (1, 4),
+                (1, 5),
+            ]
+            anchor_week = self._week_start(end_date) + timedelta(weeks=ARROW_GAP_WEEKS)
+
+        plan = [
+            ((anchor_week + timedelta(weeks=week_offset, days=day_offset)).strftime("%Y-%m-%d"), HINT_COMMITS)
+            for week_offset, day_offset in offsets
+        ]
+        return sorted(plan, key=lambda item: item[0])
+
+    @staticmethod
+    def _week_start(date_obj: datetime) -> datetime:
+        """Return the Sunday that starts date_obj's GitHub graph week."""
+        return date_obj - timedelta(days=(date_obj.weekday() + 1) % 7)
+
+    @staticmethod
+    def _plan_fits_year(plan: List[Tuple[str, int]], year: int) -> bool:
+        """Return True when every planned date is inside year."""
+        prefix = f"{year}-"
+        return all(date_str.startswith(prefix) for date_str, _ in plan)
+
     def init_repo(self) -> str:
         """
         Initialize git repository (create temp if needed).
@@ -380,7 +474,8 @@ class GitHubContributionEncoder:
         stealth_mode: Optional[bool] = None,
         time_randomization: Optional[bool] = None,
         validate: bool = True,
-        dry_run: bool = False
+        dry_run: bool = False,
+        arrow_hint: bool = False
     ) -> List[Tuple[str, int]]:
         """
         Encode a message into the git repository.
@@ -396,6 +491,7 @@ class GitHubContributionEncoder:
             time_randomization: Randomize commit times (uses config default if None)
             validate: Validate encoding before committing
             dry_run: If True, only show what would be done without creating commits
+            arrow_hint: Add a separated visual arrow clue pointing to the payload
 
         Returns:
             Commit plan (list of date, count tuples)
@@ -419,11 +515,20 @@ class GitHubContributionEncoder:
 
         # Create commit plan
         commit_plan = self.binary_to_commit_plan(binary, start_date, weekdays_only, stealth_mode)
+        payload_plan = commit_plan
+
+        if arrow_hint:
+            payload_start = datetime.strptime(payload_plan[0][0], "%Y-%m-%d")
+            payload_end = datetime.strptime(payload_plan[-1][0], "%Y-%m-%d")
+            hint_plan = self.arrow_hint_plan(payload_start, payload_end, start_date.year)
+            commit_plan = sorted(payload_plan + hint_plan, key=lambda item: item[0])
 
         logger.info(f"Commit plan: {len(commit_plan)} days")
         logger.info(f"Date range: {commit_plan[0][0]} to {commit_plan[-1][0]}")
         logger.info(f"Total commits to create: {sum(count for _, count in commit_plan)}")
         logger.info(f"Encoding mode: 2-bit payload with darkest-green start/end markers")
+        if arrow_hint:
+            logger.info("Arrow hint: ENABLED")
 
         if stealth_mode:
             logger.info("Stealth mode: ENABLED (commit counts randomized)")
@@ -432,7 +537,7 @@ class GitHubContributionEncoder:
 
         # Validate encoding if requested
         if validate and not stealth_mode:  # Skip validation in stealth mode due to randomization
-            self.validate_encoding(message, commit_plan)
+            self.validate_encoding(message, payload_plan)
 
         if dry_run:
             logger.info("\nDRY RUN MODE - No commits will be created")
@@ -560,6 +665,9 @@ Examples:
 
   # Dry run to preview commit plan
   graph-stego-encode "Test" --start 2024-01-01 --dry-run
+
+  # Add a visual arrow clue near the encoded payload
+  graph-stego-encode "Hint" --start 2024-03-01 --all-days --arrow-hint
         """
     )
 
@@ -570,6 +678,7 @@ Examples:
     parser.add_argument("--push", action="store_true", help="Push to GitHub after encoding")
     parser.add_argument("--branch", default="main", help="Branch name (default: main)")
     parser.add_argument("--all-days", action="store_true", help="Use all days (not just weekdays)")
+    parser.add_argument("--arrow-hint", action="store_true", help="Add a separated visual arrow clue")
     parser.add_argument("--author", help="Git author name")
     parser.add_argument("--email", help="Git author email")
     parser.add_argument("--commit-msg", help="Commit message template")
@@ -631,7 +740,8 @@ Examples:
             start_date,
             weekdays_only=not args.all_days,
             validate=not args.no_validate,
-            dry_run=args.dry_run
+            dry_run=args.dry_run,
+            arrow_hint=args.arrow_hint
         )
 
         if args.dry_run:
@@ -658,8 +768,8 @@ Examples:
 
         # Show decoder command
         logger.info("\nTo decode this message:")
-        end_date = start_date + timedelta(days=len(commit_plan))
-        decoder_cmd = f"graph-stego-decode <username> --start {args.start} --end {end_date.strftime('%Y-%m-%d')} --decode"
+        end_date = max(date_str for date_str, _ in commit_plan)
+        decoder_cmd = f"graph-stego-decode <username> --start {args.start} --end {end_date} --decode"
         if args.all_days:
             decoder_cmd += " --all-days"
         logger.info(f"  {decoder_cmd}")

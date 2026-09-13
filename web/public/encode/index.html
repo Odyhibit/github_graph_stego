@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="Plan and preview short messages encoded into a GitHub contribution graph."
+    >
+    <title>Encode Plan | GitHub Graph Stego Analyzer</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/">Graph Stego Analyzer</a>
+      <nav class="nav" aria-label="Primary">
+        <a href="/">Profile</a>
+        <a href="/encode/" aria-current="page">Encode</a>
+        <a href="/#roadmap">Tools</a>
+        <a href="https://github.com/" rel="noreferrer">GitHub</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero encode-hero" aria-labelledby="page-title">
+        <div class="hero-copy">
+          <p class="eyebrow">Encoding planner</p>
+          <h1 id="page-title">GitHub Grid Stego</h1>
+          <p class="lede">Find clean space before hiding anything.
+            Scan a public contribution graph for empty streaks, then preview how a short message would
+            change the grid before generating any commits.
+          </p>
+        </div>
+
+        <form id="scan-form" class="search-panel">
+          <label for="username">GitHub username</label>
+          <div class="search-row">
+            <input id="username" name="username" type="text" autocomplete="off" placeholder="octocat" required>
+            <input id="year" name="year" type="number" min="2008" max="2100" required>
+            <button type="submit">Scan</button>
+          </div>
+          <p class="fine-print">
+            This page only plans and previews. It does not authenticate, upload, push, or modify GitHub.
+          </p>
+        </form>
+      </section>
+
+      <section id="status" class="status" hidden></section>
+
+      <section id="scan-results" class="results" hidden>
+        <div class="metric-grid encoder-metrics" aria-label="Encoding capacity summary">
+          <article>
+            <span id="metric-empty">0</span>
+            <p>Longest empty streak</p>
+          </article>
+          <article>
+            <span id="metric-weekday-empty">0</span>
+            <p>Weekday encoding days</p>
+          </article>
+          <article>
+            <span id="metric-weekday-capacity">0</span>
+            <p>Weekday capacity</p>
+          </article>
+          <article>
+            <span id="metric-all-capacity">0</span>
+            <p>All-day capacity</p>
+          </article>
+        </div>
+
+        <div class="main-grid encoder-grid">
+          <section class="panel">
+            <div class="section-heading">
+              <h2>Current Graph</h2>
+              <p id="current-caption"></p>
+            </div>
+            <div id="current-calendar" class="calendar" aria-label="Current contribution calendar"></div>
+            <div class="legend" aria-label="Calendar legend">
+              <span>None</span>
+              <i class="empty"></i>
+              <i class="low"></i>
+              <i class="medium"></i>
+              <i class="high"></i>
+              <i class="marker"></i>
+              <span>Marker-like</span>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="section-heading">
+              <h2>Best Empty Ranges</h2>
+              <p>Useful places to start.</p>
+            </div>
+            <div id="candidate-list" class="candidate-list"></div>
+          </section>
+        </div>
+
+        <section class="panel encode-workspace">
+          <div class="section-heading">
+            <h2>Message Preview</h2>
+            <p>Two marker days plus four payload days per character.</p>
+          </div>
+
+          <form id="encode-form" class="encode-form">
+            <div>
+              <label for="message">Short message</label>
+              <input id="message" name="message" type="text" maxlength="24" placeholder="CTF{OK}" required>
+            </div>
+            <div>
+              <label for="mode">Mode</label>
+              <select id="mode" name="mode">
+                <option value="all-days" selected>All days</option>
+                <option value="weekdays">Weekdays only</option>
+              </select>
+            </div>
+            <div>
+              <label for="start-date">Start date</label>
+              <input id="start-date" name="start-date" type="date" required>
+            </div>
+            <label class="checkbox-row hint-toggle" for="arrow-hint">
+              <input id="arrow-hint" type="checkbox">
+              <span>Add arrow hint</span>
+            </label>
+            <button type="submit">Preview</button>
+          </form>
+
+          <div id="fit-summary" class="fit-summary" hidden></div>
+        </section>
+
+        <section id="preview-section" class="panel" hidden>
+          <div class="section-heading">
+            <h2>Preview Graph</h2>
+            <p id="preview-caption"></p>
+          </div>
+          <div id="preview-calendar" class="calendar preview-calendar" aria-label="Preview contribution calendar"></div>
+          <div class="legend preview-legend" aria-label="Preview legend">
+            <i class="planned-payload"></i>
+            <span>planned payload</span>
+            <i class="planned-marker"></i>
+            <span>planned marker</span>
+            <i class="conflict"></i>
+            <span>conflict</span>
+          </div>
+        </section>
+
+        <section id="plan-section" class="panel" hidden>
+          <div class="section-heading">
+            <h2>Run Locally</h2>
+            <p>Copy the generated workflow after the preview looks right.</p>
+          </div>
+          <div class="command-box">
+            <div>
+              <h3>Command Builder</h3>
+              <p>Requires local git auth through SSH or GitHub credentials.</p>
+            </div>
+            <div class="command-builder">
+              <div>
+                <label for="command-user">GitHub username</label>
+                <input id="command-user" type="text" autocomplete="off" placeholder="username">
+              </div>
+              <div>
+                <label for="command-repo">Repo name</label>
+                <input id="command-repo" type="text" autocomplete="off" placeholder="graph-stego-message">
+              </div>
+              <label class="checkbox-row" for="create-repo">
+                <input id="create-repo" type="checkbox">
+                <span>Create a new GitHub repo with gh</span>
+              </label>
+            </div>
+            <pre id="cli-command"><code></code></pre>
+            <button id="copy-command" type="button">Copy CLI Command</button>
+          </div>
+        </section>
+      </section>
+    </main>
+
+    <script type="module" src="/encode/encode.js"></script>
+  </body>
+</html>

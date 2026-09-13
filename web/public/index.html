@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta
+      name="description"
+      content="Analyze public GitHub contribution patterns for graph steganography and automated stat-padding signals."
+    >
+    <title>GitHub Graph Stego Analyzer</title>
+    <link rel="stylesheet" href="/styles.css">
+  </head>
+  <body>
+    <header class="topbar">
+      <a class="brand" href="/">Graph Stego Analyzer</a>
+      <nav class="nav" aria-label="Primary">
+        <a href="/" aria-current="page">Profile</a>
+        <a href="/encode/">Encode</a>
+        <a href="#roadmap">Tools</a>
+        <a href="https://github.com/" rel="noreferrer">GitHub</a>
+      </nav>
+    </header>
+
+    <main>
+      <section class="hero" aria-labelledby="page-title">
+        <div class="hero-copy">
+          <p class="eyebrow">Public contribution graph analysis</p>
+          <h1 id="page-title">Spot graph patterns that look automated.</h1>
+          <p class="lede">
+            Enter a GitHub username and year to inspect public contribution counts for signals used by
+            this project's steganography and stat-padding detectors.
+          </p>
+        </div>
+
+        <form id="profile-form" class="search-panel">
+          <label for="username">GitHub username</label>
+          <div class="search-row">
+            <input id="username" name="username" type="text" autocomplete="off" placeholder="octocat" required>
+            <input id="year" name="year" type="number" min="2008" max="2100" required>
+            <button type="submit">Analyze</button>
+          </div>
+          <p class="fine-print">
+            Uses public contribution calendar data. Results are pattern signals, not proof of intent.
+          </p>
+        </form>
+      </section>
+
+      <section id="status" class="status" hidden></section>
+
+      <section id="results" class="results" hidden>
+        <div class="score-band">
+          <div>
+            <p class="eyebrow">Suspicion score</p>
+            <h2 id="score-title">0 / 100</h2>
+            <p id="score-summary"></p>
+          </div>
+          <div id="score-meter" class="score-meter" aria-hidden="true">
+            <span></span>
+          </div>
+        </div>
+
+        <div class="metric-grid" aria-label="Contribution summary">
+          <article>
+            <span id="metric-days">0</span>
+            <p>Total days</p>
+          </article>
+          <article>
+            <span id="metric-active">0</span>
+            <p>Active days</p>
+          </article>
+          <article>
+            <span id="metric-commits">0</span>
+            <p>Total commits</p>
+          </article>
+          <article>
+            <span id="metric-average">0.0</span>
+            <p>Avg per active day</p>
+          </article>
+        </div>
+
+        <div class="main-grid">
+          <section class="panel">
+            <div class="section-heading">
+              <h2>Contribution Calendar</h2>
+              <p id="calendar-caption"></p>
+            </div>
+            <div id="calendar" class="calendar" aria-label="Contribution calendar"></div>
+            <div class="legend" aria-label="Calendar legend">
+              <span>None</span>
+              <i class="empty"></i>
+              <i class="low"></i>
+              <i class="medium"></i>
+              <i class="high"></i>
+              <i class="marker"></i>
+              <span>Marker-like</span>
+            </div>
+          </section>
+
+          <section class="panel">
+            <div class="section-heading">
+              <h2>Signals</h2>
+              <p>Why the score moved.</p>
+            </div>
+            <div id="signals" class="signals"></div>
+          </section>
+        </div>
+
+        <section class="panel">
+          <div class="section-heading">
+            <h2>Count Breakdown</h2>
+            <p>Visible payload counts are 1, 5, and 10 commits. Marker-like days are 16+ commits.</p>
+          </div>
+          <div id="breakdown" class="breakdown"></div>
+        </section>
+      </section>
+
+      <section id="roadmap" class="roadmap">
+        <div class="section-heading">
+          <h2>Next Tools</h2>
+          <p>The hosted version stays lightweight; advanced repository forensics remain in the CLI.</p>
+        </div>
+        <div class="tool-list">
+          <article>
+            <h3>Decode</h3>
+            <p>Attempt to decode marker-delimited payloads from a selected date range.</p>
+          </article>
+          <article>
+            <h3><a href="/encode/">Encode Plan</a></h3>
+            <p>Preview the date and commit-count plan for a message without writing git history.</p>
+          </article>
+          <article>
+            <h3>CLI Backdate Check</h3>
+            <p>Analyze author and committer timestamps locally for deeper repository review.</p>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

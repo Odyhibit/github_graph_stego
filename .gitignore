@@ -43,6 +43,10 @@ ENV/
 htmlcov/
 .tox/
 
+# Cloudflare/Wrangler local runtime state
+.wrangler/
+web/.wrangler/
+
 # Configuration files with secrets
 config.json
 

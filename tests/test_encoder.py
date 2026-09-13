@@ -11,6 +11,7 @@ from pathlib import Path
 from github_graph_stego.encoding import (
     GitHubContributionEncoder,
     EncodingError,
+    HINT_COMMITS,
     MARKER_COMMITS
 )
 
@@ -93,6 +94,43 @@ class TestBinaryToCommitPlan(unittest.TestCase):
         """Test empty binary string raises error."""
         with self.assertRaises(ValueError):
             self.encoder.binary_to_commit_plan("", datetime.now())
+
+
+class TestArrowHintPlan(unittest.TestCase):
+    """Test visual arrow hint planning."""
+
+    def setUp(self):
+        self.encoder = GitHubContributionEncoder()
+
+    def test_arrow_hint_prefers_left_when_room(self):
+        """Arrow hint should sit before the payload when year space allows."""
+        plan = self.encoder.arrow_hint_plan(
+            datetime(2024, 3, 20),
+            datetime(2024, 4, 10),
+            year=2024
+        )
+
+        dates = [date for date, _ in plan]
+        counts = [count for _, count in plan]
+
+        self.assertEqual(len(plan), 12)
+        self.assertTrue(all(date < "2024-03-20" for date in dates))
+        self.assertTrue(all(count == HINT_COMMITS for count in counts))
+        self.assertEqual(
+            {datetime.strptime(date, "%Y-%m-%d").weekday() for date in dates},
+            {0, 1, 2, 3, 4}
+        )
+
+    def test_arrow_hint_falls_back_right_when_left_does_not_fit(self):
+        """Early-year payloads should get a right-side mirrored arrow."""
+        plan = self.encoder.arrow_hint_plan(
+            datetime(2024, 1, 3),
+            datetime(2024, 1, 20),
+            year=2024
+        )
+
+        self.assertEqual(len(plan), 12)
+        self.assertTrue(all(date > "2024-01-20" for date, _ in plan))
 
 
 class TestValidateEncoding(unittest.TestCase):
