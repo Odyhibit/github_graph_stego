@@ -37,25 +37,29 @@ This tool uses the temporal nature of git commits and GitHub's visual contributi
 git clone <repository-url>
 cd github_graph_stego
 
-# Install dependencies
-pip install -r requirements.txt
+# Create an isolated environment
+python -m venv .venv
+source .venv/bin/activate
+
+# Install package and CLI commands
+pip install -e .
 ```
 
 ## Detection Tools
 
 In addition to the steganography tools, this project includes **detection tools** for identifying GitHub stat padding and steganographic activity:
 
-- **scraper.py** - Scrapes public contribution data without API authentication
-- **backdate_detector.py** - Analyzes repositories for backdated commits
+- **graph-stego-scrape** - Scrapes public contribution data without API authentication
+- **graph-stego-detect-backdating** - Analyzes repositories for backdated commits
 
-See [DETECTION.md](DETECTION.md) for detailed usage and interpretation guide.
+See [DETECTION.md](docs/DETECTION.md) for detailed usage and interpretation guide.
 
 ```bash
 # Detect suspicious contribution patterns (no token required)
-python scraper.py username --year 2024 --analyze
+graph-stego-scrape username --year 2024 --analyze
 
 # Detect backdated commits in a repository
-python backdate_detector.py https://github.com/username/repo --show-suspicious
+graph-stego-detect-backdating https://github.com/username/repo --show-suspicious
 ```
 
 ## Usage
@@ -64,19 +68,19 @@ python backdate_detector.py https://github.com/username/repo --show-suspicious
 
 ```bash
 # Basic encoding with temporary repository
-python encoder.py "Secret Message" --start 2024-01-01
+graph-stego-encode "Secret Message" --start 2024-01-01
 
 # Encode into existing repository and push to GitHub
-python encoder.py "CTF{flag}" --start 2024-01-01 \
+graph-stego-encode "CTF{flag}" --start 2024-01-01 \
   --repo ./my-repo \
   --remote git@github.com:username/repo.git \
   --push
 
 # Use all days (including weekends)
-python encoder.py "Message" --start 2024-01-01 --all-days
+graph-stego-encode "Message" --start 2024-01-01 --all-days
 
 # Custom git author
-python encoder.py "Message" --start 2024-01-01 \
+graph-stego-encode "Message" --start 2024-01-01 \
   --author "John Doe" \
   --email "john@example.com"
 ```
@@ -85,16 +89,16 @@ python encoder.py "Message" --start 2024-01-01 \
 
 ```bash
 # Analyze a date range (shows capacity and statistics)
-python decoder.py username --start 2024-01-01 --end 2024-01-31
+graph-stego-decode username --start 2024-01-01 --end 2024-01-31
 
 # Decode message from contribution graph
-python decoder.py username \
+graph-stego-decode username \
   --start 2024-01-01 \
   --end 2024-02-28 \
   --decode
 
 # Optionally use GitHub GraphQL API with a token
-python decoder.py username \
+graph-stego-decode username \
   --token ghp_xxxxxxxxxxxxx \
   --start 2024-01-01 \
   --end 2024-02-28 \
@@ -119,7 +123,7 @@ Decoding works without a token by scraping GitHub's public contribution graph. Y
 
 ```bash
 export GITHUB_TOKEN=ghp_xxxxxxxxxxxxx
-python decoder.py username --start 2024-01-01 --end 2024-02-28 --decode
+graph-stego-decode username --start 2024-01-01 --end 2024-02-28 --decode
 ```
 
 ## Configuration File (Optional)
@@ -178,11 +182,15 @@ This steganographic method has several detectable characteristics:
 
 ```
 github_graph_stego/
-├── encoder.py          # Message encoding system
-├── decoder.py          # Message extraction system
-├── requirements.txt    # Python dependencies
-├── .gitignore         # Git ignore rules
-└── README.md          # This file
+├── github_graph_stego/ # Core package
+│   ├── encoding.py     # Message encoding and git writing
+│   ├── decoding.py     # Message extraction
+│   ├── github.py       # Public contribution scraping
+│   └── detection.py    # Backdating/stat-padding detection
+├── pyproject.toml      # Package metadata and console scripts
+├── tests/              # Unit and integration tests
+├── docs/               # Format, detection, and project notes
+└── README.md           # This file
 ```
 
 ### Environment Variables
@@ -197,7 +205,7 @@ The encoder manipulates these git environment variables:
 
 ```bash
 # 1. Encode a message
-python encoder.py "Hello World" --start 2024-01-01 --repo ./stego-repo
+graph-stego-encode "Hello World" --start 2024-01-01 --repo ./stego-repo
 
 # 2. Push to GitHub
 cd stego-repo
@@ -207,7 +215,7 @@ git push -f origin main
 # 3. Wait a few minutes for GitHub to update the contribution graph
 
 # 4. Decode the message
-python decoder.py username --start 2024-01-01 --end 2024-03-01 --decode
+graph-stego-decode username --start 2024-01-01 --end 2024-03-01 --decode
 # Output: Hello World
 ```
 
