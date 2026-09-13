@@ -149,7 +149,7 @@ class TestIntegration(unittest.TestCase):
     def tearDown(self):
         """Clean up temporary directory."""
         if Path(self.test_dir).exists():
-            shutil.rmtree(self.test_dir)
+            shutil.rmtree(self.test_dir, ignore_errors=True)
 
     def test_encode_dry_run(self):
         """Test encoding in dry run mode."""
