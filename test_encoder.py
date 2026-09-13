@@ -11,8 +11,7 @@ from pathlib import Path
 from encoder import (
     GitHubContributionEncoder,
     EncodingError,
-    GitCommandError,
-    COMMIT_LEVELS
+    MARKER_COMMITS
 )
 
 
@@ -65,13 +64,13 @@ class TestBinaryToCommitPlan(unittest.TestCase):
         self.encoder = GitHubContributionEncoder()
 
     def test_simple_binary(self):
-        """Test 2-bit encoding (4 GitHub color levels)."""
+        """Test 2-bit encoding with darkest-green markers."""
         binary = "00011011"  # Four 2-bit chunks
         start_date = datetime(2024, 1, 1)
         plan = self.encoder.binary_to_commit_plan(binary, start_date, weekdays_only=False)
 
-        # Expected: 00->1, 01->5, 10->10, 11->20
-        expected_counts = [1, 5, 10, 20]
+        # Expected: marker, 00->0, 01->1, 10->5, 11->10, marker
+        expected_counts = [MARKER_COMMITS, 0, 1, 5, 10, MARKER_COMMITS]
         actual_counts = [count for _, count in plan]
         self.assertEqual(actual_counts, expected_counts)
 
@@ -82,8 +81,8 @@ class TestBinaryToCommitPlan(unittest.TestCase):
         plan = self.encoder.binary_to_commit_plan(binary, start_date, weekdays_only=True)
 
         dates = [date for date, _ in plan]
-        # Should be Friday and Monday (skip weekend)
-        self.assertEqual(dates, ["2024-01-05", "2024-01-08"])
+        # Should include start marker, two payload days, and end marker.
+        self.assertEqual(dates, ["2024-01-05", "2024-01-08", "2024-01-09", "2024-01-10"])
 
     def test_invalid_binary(self):
         """Test invalid binary string raises error."""
@@ -184,7 +183,7 @@ class TestIntegration(unittest.TestCase):
         self.assertTrue(git_dir.exists())
 
         # Check commit plan
-        self.assertEqual(len(plan), 8)  # "Hi" = 16 bits = 8 chunks of 2 bits
+        self.assertEqual(len(plan), 10)  # "Hi" = 8 payload chunks + 2 markers
 
 
 class TestEdgeCases(unittest.TestCase):

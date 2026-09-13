@@ -16,25 +16,25 @@ from typing import List, Tuple, Optional, Dict, Any
 from pathlib import Path
 import tempfile
 import shutil
-from tqdm import tqdm
 
 
 # Constants
 BITS_PER_BYTE = 8
-BITS_PER_CHUNK = 2  # 2-bit encoding for 4 GitHub color levels
+BITS_PER_CHUNK = 2  # 2-bit encoding for 4 payload states
 
-# Commit count mapping for different color levels
-# Maps to GitHub's actual visual representation:
-# - Level 0 (00): Light green - 1 commit
-# - Level 1 (01): Medium-light green - 5 commits
-# - Level 2 (10): Medium-dark green - 10 commits
-# - Level 3 (11): Darkest green - 20 commits
+# Commit count mapping for payload levels. The darkest green level is reserved
+# as a start/end marker, so empty days carry the 00 payload.
+# - Level 0 (00): Empty/gray - 0 commits
+# - Level 1 (01): Light green - 1 commit
+# - Level 2 (10): Medium-light green - 5 commits
+# - Level 3 (11): Medium-dark green - 10 commits
 COMMIT_LEVELS = {
-    0: 1,   # Light green (00)
-    1: 5,   # Medium-light green (01)
-    2: 10,  # Medium-dark green (10)
-    3: 20   # Darkest green (11)
+    0: 0,   # Empty/gray (00)
+    1: 1,   # Light green (01)
+    2: 5,   # Medium-light green (10)
+    3: 10   # Medium-dark green (11)
 }
+MARKER_COMMITS = 20  # Darkest green, reserved for start/end markers
 
 ASCII_PRINTABLE_MIN = 32
 ASCII_PRINTABLE_MAX = 126
@@ -88,7 +88,7 @@ class GitHubContributionEncoder:
         if repo_path and not Path(repo_path).is_dir() and Path(repo_path).exists():
             raise ValueError(f"Invalid repository path: {repo_path}")
 
-        # Use 2-bit encoding (4 levels matching GitHub's visual representation)
+        # Use 2-bit payload encoding plus darkest-green start/end markers
         self.level_to_commits = COMMIT_LEVELS
 
     def _run_git_command(
@@ -202,12 +202,18 @@ class GitHubContributionEncoder:
         if not binary_string or not all(c in '01' for c in binary_string):
             raise ValueError("Invalid binary string")
 
-        # Split binary into 2-bit chunks (4 levels for GitHub colors)
+        # Split binary into 2-bit chunks (4 payload states)
         chunks = [binary_string[i:i + BITS_PER_CHUNK]
                   for i in range(0, len(binary_string), BITS_PER_CHUNK)]
 
         commit_plan: List[Tuple[str, int]] = []
         current_date = start_date
+
+        while weekdays_only and current_date.weekday() >= 5:  # Skip weekends
+            current_date += timedelta(days=1)
+
+        commit_plan.append((current_date.strftime('%Y-%m-%d'), MARKER_COMMITS))
+        current_date += timedelta(days=1)
 
         for chunk in chunks:
             # Pad last chunk if needed
@@ -235,6 +241,11 @@ class GitHubContributionEncoder:
 
             # Move to next day
             current_date += timedelta(days=1)
+
+        while weekdays_only and current_date.weekday() >= 5:  # Skip weekends
+            current_date += timedelta(days=1)
+
+        commit_plan.append((current_date.strftime('%Y-%m-%d'), MARKER_COMMITS))
 
         return commit_plan
 
@@ -331,7 +342,11 @@ class GitHubContributionEncoder:
         """
         # Reconstruct binary from commit plan
         reconstructed_binary = ""
-        for _, commit_count in commit_plan:
+        payload_plan = commit_plan
+        if len(commit_plan) >= 2 and commit_plan[0][1] == MARKER_COMMITS and commit_plan[-1][1] == MARKER_COMMITS:
+            payload_plan = commit_plan[1:-1]
+
+        for _, commit_count in payload_plan:
             # Find closest level
             closest_level = min(
                 self.level_to_commits.keys(),
@@ -406,7 +421,7 @@ class GitHubContributionEncoder:
         logger.info(f"Commit plan: {len(commit_plan)} days")
         logger.info(f"Date range: {commit_plan[0][0]} to {commit_plan[-1][0]}")
         logger.info(f"Total commits to create: {sum(count for _, count in commit_plan)}")
-        logger.info(f"Encoding mode: 2-bit (4 GitHub color levels)")
+        logger.info(f"Encoding mode: 2-bit payload with darkest-green start/end markers")
 
         if stealth_mode:
             logger.info("Stealth mode: ENABLED (commit counts randomized)")
@@ -431,16 +446,19 @@ class GitHubContributionEncoder:
         if not repo_git_path.exists():
             self.init_repo()
 
-        # Create commits with progress bar
+        # Create commits
         logger.info("\nCreating commits...")
         total_commits = sum(count for _, count in commit_plan)
+        commits_created = 0
+        progress_interval = max(1, total_commits // 10)
 
-        with tqdm(total=total_commits, desc="Encoding", unit="commit") as pbar:
-            for i, (date_str, commit_count) in enumerate(commit_plan):
-                for j in range(commit_count):
-                    msg = f"{commit_message} {i}-{j}"
-                    self.create_commit(date_str, msg, author_name, author_email, time_randomization)
-                    pbar.update(1)
+        for i, (date_str, commit_count) in enumerate(commit_plan):
+            for j in range(commit_count):
+                msg = f"{commit_message} {i}-{j}"
+                self.create_commit(date_str, msg, author_name, author_email, time_randomization)
+                commits_created += 1
+                if commits_created % progress_interval == 0 or commits_created == total_commits:
+                    logger.info(f"Encoding progress: {commits_created}/{total_commits} commits")
 
         logger.info(f"\nEncoding complete! Created {total_commits} commits")
         logger.info(f"Repository: {self.repo_path}")

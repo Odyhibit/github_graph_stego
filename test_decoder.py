@@ -5,11 +5,11 @@ Unit tests for GitHub Contribution Graph Steganography Decoder
 
 import unittest
 from datetime import datetime
+from unittest.mock import patch
 from decoder import (
     GitHubContributionDecoder,
     DecodingError,
-    GitHubAPIError,
-    COMMIT_RANGES
+    GitHubAPIError
 )
 
 
@@ -75,12 +75,14 @@ class TestMapCommitsToBits(unittest.TestCase):
         self.decoder = GitHubContributionDecoder("testuser")
 
     def test_commit_mapping(self):
-        """Test 2-bit commit mapping (4 GitHub color levels)."""
+        """Test 2-bit commit mapping with darkest-green markers."""
         contributions = [
-            {"date": "2024-01-01", "count": 1},    # -> 00
-            {"date": "2024-01-02", "count": 5},    # -> 01
-            {"date": "2024-01-03", "count": 10},   # -> 10
-            {"date": "2024-01-04", "count": 20},   # -> 11
+            {"date": "2024-01-01", "count": 20},   # start marker
+            {"date": "2024-01-02", "count": 0},    # -> 00
+            {"date": "2024-01-03", "count": 1},    # -> 01
+            {"date": "2024-01-04", "count": 5},    # -> 10
+            {"date": "2024-01-05", "count": 10},   # -> 11
+            {"date": "2024-01-06", "count": 20},   # end marker
         ]
         binary = self.decoder.map_commits_to_bits(contributions)
         self.assertEqual(binary, "00011011")
@@ -88,23 +90,35 @@ class TestMapCommitsToBits(unittest.TestCase):
     def test_tolerance_ranges(self):
         """Test that tolerance ranges work correctly."""
         contributions = [
-            {"date": "2024-01-01", "count": 2},    # -> 00 (within 0-2)
-            {"date": "2024-01-02", "count": 7},    # -> 01 (within 3-7)
-            {"date": "2024-01-03", "count": 15},   # -> 10 (within 8-15)
-            {"date": "2024-01-04", "count": 100},  # -> 11 (within 16+)
+            {"date": "2024-01-01", "count": 20},   # start marker
+            {"date": "2024-01-02", "count": 0},    # -> 00
+            {"date": "2024-01-03", "count": 2},    # -> 01 (within 1-2)
+            {"date": "2024-01-04", "count": 7},    # -> 10 (within 3-7)
+            {"date": "2024-01-05", "count": 15},   # -> 11 (within 8-15)
+            {"date": "2024-01-06", "count": 20},   # end marker
         ]
         binary = self.decoder.map_commits_to_bits(contributions)
         self.assertEqual(binary, "00011011")
 
-    def test_skip_zero_commits(self):
-        """Test that zero commits are skipped in 2-bit mode."""
+    def test_zero_commits_decode_as_payload(self):
+        """Test that zero commits decode as 00 between markers."""
         contributions = [
-            {"date": "2024-01-01", "count": 0},    # skipped
-            {"date": "2024-01-02", "count": 1},    # -> 00
-            {"date": "2024-01-03", "count": 5},    # -> 01
+            {"date": "2024-01-01", "count": 20},   # start marker
+            {"date": "2024-01-02", "count": 0},    # -> 00
+            {"date": "2024-01-03", "count": 1},    # -> 01
+            {"date": "2024-01-04", "count": 20},   # end marker
         ]
         binary = self.decoder.map_commits_to_bits(contributions)
         self.assertEqual(binary, "0001")
+
+    def test_missing_markers_raise_error(self):
+        """Test that marker-delimited data is required."""
+        contributions = [
+            {"date": "2024-01-01", "count": 0},
+            {"date": "2024-01-02", "count": 1},
+        ]
+        with self.assertRaises(DecodingError):
+            self.decoder.map_commits_to_bits(contributions)
 
 
 class TestFilterWeekdays(unittest.TestCase):
@@ -138,8 +152,8 @@ class TestFilterWeekdays(unittest.TestCase):
         self.assertEqual(len(filtered), 5)
 
 
-class TestTokenLoading(unittest.TestCase):
-    """Test token loading functionality."""
+class TestContributionFetching(unittest.TestCase):
+    """Test contribution fetching sources."""
 
     def test_token_from_argument(self):
         """Test token passed as argument."""
@@ -152,6 +166,43 @@ class TestTokenLoading(unittest.TestCase):
         decoder = GitHubContributionDecoder("testuser")
         # Should not raise error, token can be None
         self.assertIsInstance(decoder, GitHubContributionDecoder)
+        self.assertIsNone(decoder.token)
+
+    @patch("decoder.GitHubContributionScraper")
+    def test_public_scraper_without_token(self, mock_scraper_class):
+        """Test decoder uses public scraping when no token is provided."""
+        mock_scraper = mock_scraper_class.return_value
+        mock_scraper.get_contribution_data.return_value = [
+            {"date": "2024-01-01", "count": 20, "level": 4},
+            {"date": "2024-01-02", "count": 0, "level": 0},
+            {"date": "2024-01-03", "count": 20, "level": 4},
+            {"date": "2024-01-04", "count": 1, "level": 1},
+        ]
+
+        decoder = GitHubContributionDecoder("testuser")
+        contributions = decoder.get_contribution_data("2024-01-01", "2024-01-03")
+
+        mock_scraper_class.assert_called_once_with("testuser")
+        mock_scraper.get_contribution_data.assert_called_once_with(2024)
+        self.assertEqual(
+            contributions,
+            [
+                {"date": "2024-01-01", "count": 20},
+                {"date": "2024-01-02", "count": 0},
+                {"date": "2024-01-03", "count": 20},
+            ]
+        )
+
+    @patch.object(GitHubContributionDecoder, "_get_graphql_contribution_data")
+    def test_token_uses_graphql(self, mock_graphql):
+        """Test decoder uses GraphQL when a token is provided."""
+        mock_graphql.return_value = [{"date": "2024-01-01", "count": 0}]
+
+        decoder = GitHubContributionDecoder("testuser", token="ghp_test123")
+        contributions = decoder.get_contribution_data("2024-01-01", "2024-01-01")
+
+        mock_graphql.assert_called_once_with("2024-01-01", "2024-01-01", 3)
+        self.assertEqual(contributions, [{"date": "2024-01-01", "count": 0}])
 
 
 class TestRoundtrip(unittest.TestCase):

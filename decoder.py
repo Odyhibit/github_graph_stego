@@ -11,27 +11,29 @@ import logging
 import os
 from datetime import datetime, timedelta
 from typing import List, Dict, Any, Optional
-from pathlib import Path
 import argparse
 import sys
+
+from scraper import GitHubContributionScraper
 
 
 # Constants
 BITS_PER_BYTE = 8
-BITS_PER_CHUNK = 2  # 2-bit encoding for 4 GitHub color levels
+BITS_PER_CHUNK = 2  # 2-bit encoding for 4 payload states
 
 # ASCII character range for printable characters
 ASCII_PRINTABLE_MIN = 32
 ASCII_PRINTABLE_MAX = 126
 
-# Commit count tolerance ranges for 2-bit decoding
-# Maps GitHub's visual color levels to bit patterns
+# Commit count tolerance ranges for 2-bit payload decoding. The darkest green
+# level is reserved as a start/end marker, so empty days carry the 00 payload.
 COMMIT_RANGES = [
-    (0, 2, "00"),    # Light green (0-2 commits) -> 00
-    (3, 7, "01"),    # Medium-light green (3-7 commits) -> 01
-    (8, 15, "10"),   # Medium-dark green (8-15 commits) -> 10
-    (16, 100, "11")  # Darkest green (16+ commits) -> 11
+    (0, 0, "00"),    # Empty/gray (0 commits) -> 00
+    (1, 2, "01"),    # Light green (1-2 commits) -> 01
+    (3, 7, "10"),    # Medium-light green (3-7 commits) -> 10
+    (8, 15, "11")    # Medium-dark green (8-15 commits) -> 11
 ]
+MARKER_MIN_COMMITS = 16  # Darkest green, reserved for start/end markers
 
 # GitHub GraphQL API endpoint
 GITHUB_GRAPHQL_API = "https://api.github.com/graphql"
@@ -63,41 +65,97 @@ class GitHubContributionDecoder:
 
         Args:
             username: GitHub username to analyze
-            token: GitHub personal access token (optional but recommended for rate limits)
+            token: GitHub personal access token (optional; enables GraphQL API)
         """
         self.username = username
-        self.token = token or self._load_token_from_file()
+        self.token = token
         self.api_url = GITHUB_GRAPHQL_API
         self.commit_ranges = COMMIT_RANGES
 
         if self.token:
             logger.debug("Using GitHub API token for authentication")
         else:
-            logger.warning("No GitHub token provided. API rate limits may apply.")
-
-    def _load_token_from_file(self, token_file: str = "token.txt") -> Optional[str]:
-        """
-        Try to load token from file.
-
-        Args:
-            token_file: Path to token file
-
-        Returns:
-            Token string or None if file doesn't exist
-        """
-        try:
-            token_path = Path(token_file)
-            if token_path.exists():
-                with open(token_path, 'r') as f:
-                    token = f.read().strip()
-                    if token:
-                        logger.info(f"Loaded GitHub token from {token_file}")
-                        return token
-        except (OSError, IOError) as e:
-            logger.debug(f"Could not load token from {token_file}: {e}")
-        return None
+            logger.debug("No GitHub token provided; using public contribution scraping")
 
     def get_contribution_data(
+        self,
+        start_date: str,
+        end_date: str,
+        retry_count: int = 3
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        Fetch contribution data.
+
+        Uses public contribution scraping by default. If a token was provided,
+        uses GitHub's GraphQL API instead.
+
+        Args:
+            start_date: Start date (YYYY-MM-DD)
+            end_date: End date (YYYY-MM-DD)
+            retry_count: Number of retries on failure
+
+        Returns:
+            List of dicts with 'date' and 'count' keys
+
+        Raises:
+            GitHubAPIError: If API request fails after retries
+            ValueError: If date format is invalid
+        """
+        # Validate date format
+        try:
+            start_obj = datetime.strptime(start_date, "%Y-%m-%d")
+            end_obj = datetime.strptime(end_date, "%Y-%m-%d")
+        except ValueError as e:
+            raise ValueError(f"Invalid date format: {e}. Use YYYY-MM-DD")
+
+        if end_obj < start_obj:
+            raise ValueError("End date must be on or after start date")
+
+        if not self.token:
+            return self._get_public_contribution_data(start_obj, end_obj)
+
+        return self._get_graphql_contribution_data(start_date, end_date, retry_count)
+
+    def _get_public_contribution_data(
+        self,
+        start_obj: datetime,
+        end_obj: datetime
+    ) -> List[Dict[str, Any]]:
+        """
+        Fetch public contribution data without a token and filter to date range.
+
+        Args:
+            start_obj: Start date
+            end_obj: End date
+
+        Returns:
+            List of dicts with 'date' and 'count' keys
+        """
+        scraper = GitHubContributionScraper(self.username)
+        contributions: List[Dict[str, Any]] = []
+
+        for year in range(start_obj.year, end_obj.year + 1):
+            try:
+                contributions.extend(scraper.get_contribution_data(year))
+            except requests.RequestException as e:
+                raise GitHubAPIError(f"Public contribution scrape failed: {e}")
+
+        start_date = start_obj.strftime("%Y-%m-%d")
+        end_date = end_obj.strftime("%Y-%m-%d")
+        filtered = [
+            {"date": c["date"], "count": c["count"]}
+            for c in contributions
+            if start_date <= c["date"] <= end_date
+        ]
+        filtered.sort(key=lambda c: c["date"])
+
+        if not filtered:
+            raise GitHubAPIError("No public contribution data found")
+
+        logger.debug(f"Fetched {len(filtered)} public contribution days")
+        return filtered
+
+    def _get_graphql_contribution_data(
         self,
         start_date: str,
         end_date: str,
@@ -116,15 +174,7 @@ class GitHubContributionDecoder:
 
         Raises:
             GitHubAPIError: If API request fails after retries
-            ValueError: If date format is invalid
         """
-        # Validate date format
-        try:
-            datetime.strptime(start_date, "%Y-%m-%d")
-            datetime.strptime(end_date, "%Y-%m-%d")
-        except ValueError as e:
-            raise ValueError(f"Invalid date format: {e}. Use YYYY-MM-DD")
-
         query = """
         query($username: String!, $from: DateTime!, $to: DateTime!) {
           user(login: $username) {
@@ -152,8 +202,7 @@ class GitHubContributionDecoder:
             "Content-Type": "application/json",
         }
 
-        if self.token:
-            headers["Authorization"] = f"Bearer {self.token}"
+        headers["Authorization"] = f"Bearer {self.token}"
 
         last_error = None
         for attempt in range(retry_count):
@@ -224,7 +273,7 @@ class GitHubContributionDecoder:
 
     def map_commits_to_bits(self, contributions: List[Dict[str, Any]]) -> str:
         """
-        Map commit counts to bit patterns using 2-bit encoding.
+        Map commit counts between darkest-green markers to bit patterns.
 
         Args:
             contributions: List of contribution dicts
@@ -233,16 +282,26 @@ class GitHubContributionDecoder:
             Binary string
 
         Raises:
-            DecodingError: If commit count mapping fails
+            DecodingError: If markers are missing or commit count mapping fails
         """
+        marker_indices = [
+            i for i, contrib in enumerate(contributions)
+            if contrib["count"] >= MARKER_MIN_COMMITS
+        ]
+
+        if len(marker_indices) < 2:
+            raise DecodingError("Could not find start and end markers")
+
+        start_index = marker_indices[0]
+        end_index = marker_indices[-1]
+
+        if end_index <= start_index + 1:
+            raise DecodingError("No payload data found between markers")
+
         binary = ""
 
-        for contrib in contributions:
+        for contrib in contributions[start_index + 1:end_index]:
             count = contrib["count"]
-
-            # Skip zero-commit days (no encoding)
-            if count == 0:
-                continue
 
             # Find matching range
             matched = False
@@ -253,7 +312,9 @@ class GitHubContributionDecoder:
                     break
 
             if not matched:
-                logger.warning(f"Could not map commit count {count} on {contrib['date']}")
+                raise DecodingError(
+                    f"Commit count {count} on {contrib['date']} is reserved for markers"
+                )
 
         return binary
 
@@ -347,11 +408,12 @@ class GitHubContributionDecoder:
         logger.info(f"\nWeekdays only: {len(weekday_contributions)} days")
         logger.info(f"Weekdays with commits: {weekday_days_with_commits}")
 
-        # Calculate capacity (2-bit encoding)
-        capacity = len(weekday_contributions) * BITS_PER_CHUNK // BITS_PER_BYTE  # bytes
+        # Calculate capacity (2-bit encoding, minus start/end marker days)
+        payload_days = max(0, len(weekday_contributions) - 2)
+        capacity = payload_days * BITS_PER_CHUNK // BITS_PER_BYTE  # bytes
 
         logger.info(f"\n=== Encoding Capacity ===")
-        logger.info(f"2-bit encoding (4 GitHub color levels): {capacity} bytes ({capacity} characters)")
+        logger.info(f"2-bit payload with darkest-green markers: {capacity} bytes ({capacity} characters)")
         logger.info(f"Approximate capacity: ~{capacity // 4} characters per month (weekdays only)")
 
         return contributions
@@ -387,14 +449,14 @@ class GitHubContributionDecoder:
         if weekdays_only:
             contributions = self.filter_weekdays(contributions)
 
-        # Convert to binary using 2-bit encoding
+        # Convert marker-delimited payload to binary using 2-bit encoding
         binary = self.map_commits_to_bits(contributions)
 
         if not binary:
-            raise DecodingError("No data to decode - all days have 0 commits")
+            raise DecodingError("No payload data to decode")
 
         logger.info(f"\nBinary data ({len(binary)} bits): {binary[:64]}{'...' if len(binary) > 64 else ''}")
-        logger.info(f"Encoding: 2-bit (4 GitHub color levels)")
+        logger.info(f"Encoding: 2-bit payload with darkest-green start/end markers")
 
         # Convert to ASCII
         message = self.binary_to_ascii(binary, strict=strict)
@@ -418,18 +480,17 @@ Examples:
   # Decode a message
   python decoder.py username --start 2024-01-01 --end 2024-02-28 --decode
 
-  # Use GitHub token for better rate limits
+  # Optionally use GitHub GraphQL API with a token
   python decoder.py username --token ghp_xxxxx --start 2024-01-01 --end 2024-02-28 --decode
 
-  # Set token via environment variable
+  # Optionally set token via environment variable
   export GITHUB_TOKEN=ghp_xxxxx
   python decoder.py username --start 2024-01-01 --end 2024-02-28 --decode
         """
     )
 
     parser.add_argument("username", help="GitHub username to analyze")
-    parser.add_argument("--token", help="GitHub personal access token (optional)")
-    parser.add_argument("--token-file", default="token.txt", help="Path to token file (default: token.txt)")
+    parser.add_argument("--token", help="GitHub personal access token (optional; uses GraphQL API)")
     parser.add_argument("--start", required=True, help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", required=True, help="End date (YYYY-MM-DD)")
     parser.add_argument("--decode", action="store_true", help="Attempt to decode message")
@@ -446,7 +507,7 @@ Examples:
     elif args.verbose:
         logger.setLevel(logging.DEBUG)
 
-    # Get token from arguments, environment, or file
+    # Get optional token from arguments or environment
     token = args.token or os.environ.get('GITHUB_TOKEN')
 
     try:
@@ -455,10 +516,6 @@ Examples:
             args.username,
             token=token
         )
-
-        # If no token from args/env, try loading from file
-        if not token and args.token_file:
-            decoder.token = decoder._load_token_from_file(args.token_file)
 
         if args.decode:
             logger.info("\n=== Decoding Message ===")

@@ -12,20 +12,23 @@ This tool uses the temporal nature of git commits and GitHub's visual contributi
 
 1. **Text to Binary**: Converts each character to 8-bit binary representation
 2. **Binary Chunking**: Splits binary into 2-bit segments (4 possible values: 00, 01, 10, 11)
-3. **Commit Mapping**: Maps each 2-bit value to a commit count:
-   - `00` → 1 commit (light green)
-   - `01` → 5 commits (medium-light green)
-   - `10` → 10 commits (medium-dark green)
-   - `11` → 20 commits (darkest green)
-4. **Backdated Commits**: Creates git commits with manipulated timestamps
-5. **GitHub Push**: Pushes to GitHub where the contribution graph visually encodes the message
+3. **Marker Framing**: Adds a darkest-green day at the start and end of the payload
+4. **Commit Mapping**: Maps each 2-bit value to a contribution graph state:
+   - `00` → 0 commits (empty/gray)
+   - `01` → 1 commit (light green)
+   - `10` → 5 commits (medium-light green)
+   - `11` → 10 commits (medium-dark green)
+   - start/end marker → 20 commits (darkest green)
+5. **Backdated Commits**: Creates git commits with manipulated timestamps
+6. **GitHub Push**: Pushes to GitHub where the contribution graph visually encodes the message
 
 ### Decoding Process
 
-1. **API Fetch**: Retrieves contribution counts from GitHub's GraphQL API
-2. **Reverse Mapping**: Converts commit counts back to 2-bit patterns
-3. **Binary Reassembly**: Combines 2-bit chunks into 8-bit bytes
-4. **Binary to ASCII**: Converts bytes back to readable text
+1. **Public Fetch**: Retrieves contribution counts from GitHub's public contribution graph
+2. **Marker Detection**: Finds the darkest-green start and end marker days
+3. **Reverse Mapping**: Converts the cells between markers back to 2-bit patterns
+4. **Binary Reassembly**: Combines 2-bit chunks into 8-bit bytes
+5. **Binary to ASCII**: Converts bytes back to readable text
 
 ## Installation
 
@@ -36,6 +39,23 @@ cd github_graph_stego
 
 # Install dependencies
 pip install -r requirements.txt
+```
+
+## Detection Tools
+
+In addition to the steganography tools, this project includes **detection tools** for identifying GitHub stat padding and steganographic activity:
+
+- **scraper.py** - Scrapes public contribution data without API authentication
+- **backdate_detector.py** - Analyzes repositories for backdated commits
+
+See [DETECTION.md](DETECTION.md) for detailed usage and interpretation guide.
+
+```bash
+# Detect suspicious contribution patterns (no token required)
+python scraper.py username --year 2024 --analyze
+
+# Detect backdated commits in a repository
+python backdate_detector.py https://github.com/username/repo --show-suspicious
 ```
 
 ## Usage
@@ -73,7 +93,7 @@ python decoder.py username \
   --end 2024-02-28 \
   --decode
 
-# Use GitHub token for better rate limits
+# Optionally use GitHub GraphQL API with a token
 python decoder.py username \
   --token ghp_xxxxxxxxxxxxx \
   --start 2024-01-01 \
@@ -85,19 +105,21 @@ python decoder.py username \
 
 With weekday-only encoding (Mon-Fri):
 - Each day encodes 2 bits (1/4 byte)
+- The start and end markers use 2 additional days
 - Approximately **5-6 characters per month**
 - A 10-character message requires ~40 weekdays (~2 months)
 
 ## GitHub API Token
 
-For decoding, you can optionally provide a GitHub personal access token to avoid rate limits:
+Decoding works without a token by scraping GitHub's public contribution graph. You can optionally provide a GitHub personal access token to use the GraphQL API instead:
 
 1. Create a token at: https://github.com/settings/tokens
 2. No special scopes required (public data access only)
-3. Save to `token.txt` (git-ignored) or use `--token` flag
+3. Pass it with `--token` or set `GITHUB_TOKEN`
 
 ```bash
-echo "ghp_xxxxxxxxxxxxx" > token.txt
+export GITHUB_TOKEN=ghp_xxxxxxxxxxxxx
+python decoder.py username --start 2024-01-01 --end 2024-02-28 --decode
 ```
 
 ## Configuration File (Optional)
@@ -125,7 +147,7 @@ Create a `config.json` file for default settings:
 
 This steganographic method has several detectable characteristics:
 
-1. **Pattern Recognition**: Commit counts of exactly 1, 5, 10, or 20 are statistically unusual
+1. **Pattern Recognition**: Commit counts of exactly 1, 5, or 10 with rare 20+ commit markers are statistically unusual
 2. **Timing Analysis**: All commits at the same time (12:00 by default) is suspicious
 3. **Statistical Analysis**: Unusual uniformity in contribution patterns
 4. **Metadata Forensics**: Backdated commits are visible in raw git data
@@ -140,7 +162,7 @@ This steganographic method has several detectable characteristics:
 
 - **Low Capacity**: ~5 characters per month (weekdays only)
 - **Requires GitHub Access**: Must be able to push to a repository
-- **Date Range Dependency**: Decoder needs exact start/end dates
+- **Date Range Dependency**: Decoder needs a date range containing the start/end markers
 - **Public Visibility**: Contribution graphs are publicly visible
 
 ## Technical Details
@@ -149,7 +171,7 @@ This steganographic method has several detectable characteristics:
 
 - Python 3.7+
 - `requests` library for GitHub API
-- `tqdm` for progress bars
+- `beautifulsoup4` for contribution scraping
 - Git installed and accessible via command line
 
 ### File Structure
@@ -159,7 +181,6 @@ github_graph_stego/
 ├── encoder.py          # Message encoding system
 ├── decoder.py          # Message extraction system
 ├── requirements.txt    # Python dependencies
-├── token.txt          # GitHub token (git-ignored)
 ├── .gitignore         # Git ignore rules
 └── README.md          # This file
 ```
@@ -206,7 +227,7 @@ python decoder.py username --start 2024-01-01 --end 2024-03-01 --decode
 ### Decoding Issues
 
 **Problem**: "Rate limit exceeded"
-- Use a GitHub personal access token with `--token`
+- Retry later or use a GitHub personal access token with `--token`
 - Wait an hour for rate limits to reset
 
 **Problem**: "Failed to decode message"
