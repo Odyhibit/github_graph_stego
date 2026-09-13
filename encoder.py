@@ -266,6 +266,8 @@ class GitHubContributionEncoder:
 
         # Initialize git repo
         self._run_git_command(['git', 'init'])
+        self._run_git_command(['git', 'config', 'user.name', self.config.get("author_name", "Steganographer")])
+        self._run_git_command(['git', 'config', 'user.email', self.config.get("author_email", "stego@example.com")])
 
         # Create initial file
         readme_path = Path(self.repo_path) / 'README.md'
