@@ -14,7 +14,7 @@ from typing import List, Dict, Any, Optional
 import argparse
 import sys
 
-from scraper import GitHubContributionScraper
+from github_graph_stego.github import GitHubContributionScraper
 
 
 # Constants
@@ -475,17 +475,17 @@ def main():
         epilog="""
 Examples:
   # Analyze a date range
-  python decoder.py username --start 2024-01-01 --end 2024-01-31
+  graph-stego-decode username --start 2024-01-01 --end 2024-01-31
 
   # Decode a message
-  python decoder.py username --start 2024-01-01 --end 2024-02-28 --decode
+  graph-stego-decode username --start 2024-01-01 --end 2024-02-28 --decode
 
   # Optionally use GitHub GraphQL API with a token
-  python decoder.py username --token ghp_xxxxx --start 2024-01-01 --end 2024-02-28 --decode
+  graph-stego-decode username --token ghp_xxxxx --start 2024-01-01 --end 2024-02-28 --decode
 
   # Optionally set token via environment variable
   export GITHUB_TOKEN=ghp_xxxxx
-  python decoder.py username --start 2024-01-01 --end 2024-02-28 --decode
+  graph-stego-decode username --start 2024-01-01 --end 2024-02-28 --decode
         """
     )
 

@@ -546,20 +546,20 @@ def main():
         epilog="""
 Examples:
   # Encode a message starting Jan 1, 2024 (creates temp repo)
-  python encoder.py "CTF{hidden_flag}" --start 2024-01-01
+  graph-stego-encode "CTF{hidden_flag}" --start 2024-01-01
 
   # Encode into existing repository
-  python encoder.py "CTF{hidden_flag}" --start 2024-01-01 --repo ./my-repo
+  graph-stego-encode "CTF{hidden_flag}" --start 2024-01-01 --repo ./my-repo
 
   # Add remote and push to GitHub
-  python encoder.py "CTF{hidden_flag}" --start 2024-01-01 \\
+  graph-stego-encode "CTF{hidden_flag}" --start 2024-01-01 \\
     --remote git@github.com:username/repo.git --push
 
   # Use stealth mode with time randomization
-  python encoder.py "Secret" --start 2024-01-01 --stealth --randomize-time
+  graph-stego-encode "Secret" --start 2024-01-01 --stealth --randomize-time
 
   # Dry run to preview commit plan
-  python encoder.py "Test" --start 2024-01-01 --dry-run
+  graph-stego-encode "Test" --start 2024-01-01 --dry-run
         """
     )
 
@@ -659,7 +659,7 @@ Examples:
         # Show decoder command
         logger.info("\nTo decode this message:")
         end_date = start_date + timedelta(days=len(commit_plan))
-        decoder_cmd = f"python decoder.py <username> --start {args.start} --end {end_date.strftime('%Y-%m-%d')} --decode"
+        decoder_cmd = f"graph-stego-decode <username> --start {args.start} --end {end_date.strftime('%Y-%m-%d')} --decode"
         if args.all_days:
             decoder_cmd += " --all-days"
         logger.info(f"  {decoder_cmd}")

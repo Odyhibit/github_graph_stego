@@ -6,7 +6,7 @@ Unit tests for GitHub Contribution Graph Steganography Decoder
 import unittest
 from datetime import datetime
 from unittest.mock import patch
-from decoder import (
+from github_graph_stego.decoding import (
     GitHubContributionDecoder,
     DecodingError,
     GitHubAPIError
@@ -168,7 +168,7 @@ class TestContributionFetching(unittest.TestCase):
         self.assertIsInstance(decoder, GitHubContributionDecoder)
         self.assertIsNone(decoder.token)
 
-    @patch("decoder.GitHubContributionScraper")
+    @patch("github_graph_stego.decoding.GitHubContributionScraper")
     def test_public_scraper_without_token(self, mock_scraper_class):
         """Test decoder uses public scraping when no token is provided."""
         mock_scraper = mock_scraper_class.return_value
@@ -210,7 +210,7 @@ class TestRoundtrip(unittest.TestCase):
 
     def test_message_roundtrip(self):
         """Test that encoded message can be decoded."""
-        from encoder import GitHubContributionEncoder
+        from github_graph_stego.encoding import GitHubContributionEncoder
 
         # Create encoder and decoder
         encoder = GitHubContributionEncoder()
@@ -238,7 +238,7 @@ class TestRoundtrip(unittest.TestCase):
 
     def test_complex_messages(self):
         """Test roundtrip with various messages."""
-        from encoder import GitHubContributionEncoder
+        from github_graph_stego.encoding import GitHubContributionEncoder
 
         test_messages = [
             "A",
@@ -276,7 +276,7 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_very_long_message(self):
         """Test encoding/decoding a long message."""
-        from encoder import GitHubContributionEncoder
+        from github_graph_stego.encoding import GitHubContributionEncoder
 
         encoder = GitHubContributionEncoder()
         decoder = GitHubContributionDecoder("testuser")
@@ -301,7 +301,7 @@ class TestEdgeCases(unittest.TestCase):
 
     def test_all_same_character(self):
         """Test message with all same characters."""
-        from encoder import GitHubContributionEncoder
+        from github_graph_stego.encoding import GitHubContributionEncoder
 
         encoder = GitHubContributionEncoder()
         decoder = GitHubContributionDecoder("testuser")

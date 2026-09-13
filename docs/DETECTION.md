@@ -6,8 +6,8 @@ This document explains how to use the detection tools to identify users who may 
 
 Two complementary tools are provided:
 
-1. **scraper.py** - Scrapes contribution data from public profiles (no API token required)
-2. **backdate_detector.py** - Analyzes git repositories for backdated commits
+1. **graph-stego-scrape** - Scrapes contribution data from public profiles (no API token required)
+2. **graph-stego-detect-backdating** - Analyzes git repositories for backdated commits
 
 ## Tool 1: Contribution Pattern Scraper
 
@@ -42,13 +42,13 @@ If all three visible payload counts appear with roughly equal frequency (suspici
 
 ```bash
 # Basic usage - scrape contribution data
-python scraper.py username
+graph-stego-scrape username
 
 # Analyze a specific year
-python scraper.py username --year 2024
+graph-stego-scrape username --year 2024
 
 # Analyze for suspicious patterns
-python scraper.py username --year 2024 --analyze
+graph-stego-scrape username --year 2024 --analyze
 ```
 
 ### Sample Output
@@ -122,13 +122,13 @@ Many commits (10+) on a single day, repeated across multiple days, suggests auto
 
 ```bash
 # Analyze a GitHub repository
-python backdate_detector.py https://github.com/username/repo
+graph-stego-detect-backdating https://github.com/username/repo
 
 # Use a local repository clone
-python backdate_detector.py https://github.com/username/repo --local /path/to/repo
+graph-stego-detect-backdating https://github.com/username/repo --local /path/to/repo
 
 # Show suspicious commits
-python backdate_detector.py https://github.com/username/repo --show-suspicious
+graph-stego-detect-backdating https://github.com/username/repo --show-suspicious
 ```
 
 ### Sample Output
@@ -167,7 +167,7 @@ For the most accurate detection, use both tools together:
 
 ### Step 1: Scrape Contribution Pattern
 ```bash
-python scraper.py suspicious_user --year 2024 --analyze
+graph-stego-scrape suspicious_user --year 2024 --analyze
 ```
 
 **Look for:**
@@ -177,7 +177,7 @@ python scraper.py suspicious_user --year 2024 --analyze
 
 ### Step 2: Analyze Repository Commits
 ```bash
-python backdate_detector.py https://github.com/suspicious_user/repo --show-suspicious
+graph-stego-detect-backdating https://github.com/suspicious_user/repo --show-suspicious
 ```
 
 **Look for:**

@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "github-graph-stego"
+version = "0.1.0"
+description = "Hide and decode messages in GitHub contribution graph patterns."
+readme = "README.md"
+requires-python = ">=3.9"
+dependencies = [
+    "requests>=2.31.0",
+    "beautifulsoup4>=4.12.0",
+]
+
+[project.scripts]
+graph-stego-encode = "github_graph_stego.cli.encode:main"
+graph-stego-decode = "github_graph_stego.cli.decode:main"
+graph-stego-scrape = "github_graph_stego.cli.scrape:main"
+graph-stego-detect-backdating = "github_graph_stego.cli.detect_backdating:main"
+
+[tool.setuptools.packages.find]
+include = ["github_graph_stego*"]

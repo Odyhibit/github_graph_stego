@@ -8,7 +8,7 @@ import tempfile
 import shutil
 from datetime import datetime
 from pathlib import Path
-from encoder import (
+from github_graph_stego.encoding import (
     GitHubContributionEncoder,
     EncodingError,
     MARKER_COMMITS
