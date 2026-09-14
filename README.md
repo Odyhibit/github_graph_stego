@@ -2,6 +2,9 @@
 
 A steganographic system that encodes secret messages into GitHub contribution patterns (the green squares on a user's GitHub profile) and decodes them back.
 
+## Take a look
+https://github-graph-stego.pages.dev
+
 ## Overview
 
 This tool uses the temporal nature of git commits and GitHub's visual contribution graph as a covert data transmission channel. Messages are encoded as patterns of commits on specific dates, where each day's commit count corresponds to a portion of the binary-encoded message.
